@@ -44,3 +44,8 @@ html5lib>=1.1
 
 # PDF generation
 reportlab>=4.0.0
+
+# Deployment and core app dependencies
+streamlit
+langchain-google-genai
+duckduckgo-search
