@@ -1,4 +1,5 @@
-from agents import build_reader_agent , build_search_agent , writer_chain , critic_chain
+from agents import build_reader_agent , build_search_agent , writer_chain , critic_chain, clean_content
+import time
 
 def run_research_pipeline(topic : str) -> dict:
 
@@ -13,9 +14,10 @@ def run_research_pipeline(topic : str) -> dict:
     search_result = search_agent.invoke({
         "messages" : [("user", f"Find recent, reliable and detailed information about: {topic}")]
     })
-    state["search_results"] = search_result['messages'][-1].content
+    state["search_results"] = clean_content(search_result['messages'][-1].content)
 
     print("\n search result ",state['search_results'])
+    time.sleep(2) # Rate limit safety delay for free tier API keys
 
     #step 2 - reader agent 
     print("\n"+" ="*50)
@@ -31,9 +33,10 @@ def run_research_pipeline(topic : str) -> dict:
         )]
     })
 
-    state['scraped_content'] = reader_result['messages'][-1].content
+    state['scraped_content'] = clean_content(reader_result['messages'][-1].content)
 
     print("\nscraped content: \n", state['scraped_content'])
+    time.sleep(2) # Rate limit safety delay for free tier API keys
 
     #step 3 - writer chain 
 
@@ -52,6 +55,7 @@ def run_research_pipeline(topic : str) -> dict:
     })
 
     print("\n Final Report\n",state['report'])
+    time.sleep(2) # Rate limit safety delay for free tier API keys
 
     #critic report 
 

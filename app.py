@@ -1,6 +1,7 @@
 import streamlit as st
 import time
-from agents import build_reader_agent, build_search_agent, writer_chain, critic_chain
+from agents import build_reader_agent, build_search_agent, get_writer_chain, get_critic_chain, check_keys, clean_content
+from pdf_generator import generate_report_pdf, generate_critic_pdf, generate_combined_pdf
 
 # ── Page config ──────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -16,7 +17,7 @@ st.markdown("""
 @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap');
 
 /* ── Reset & base ── */
-html, body, [class*="css"] {
+html, body, .stApp {
     font-family: 'DM Sans', sans-serif;
     color: #e8e4dc;
 }
@@ -26,6 +27,22 @@ html, body, [class*="css"] {
     background-image:
         radial-gradient(ellipse 80% 50% at 20% -10%, rgba(255,140,50,0.12) 0%, transparent 60%),
         radial-gradient(ellipse 60% 40% at 80% 110%, rgba(255,80,30,0.08) 0%, transparent 55%);
+}
+
+/* ── Panel typography & legibility ── */
+.report-panel h1, .report-panel h2, .report-panel h3, .report-panel h4,
+.feedback-panel h1, .feedback-panel h2, .feedback-panel h3, .feedback-panel h4 {
+    font-family: 'Syne', sans-serif;
+    color: #f0ebe0 !important;
+    font-weight: 700 !important;
+    margin-top: 1.5rem !important;
+    margin-bottom: 0.8rem !important;
+}
+
+.report-panel p, .feedback-panel p, .report-panel li, .feedback-panel li {
+    color: #cdc8bf !important;
+    font-size: 0.95rem;
+    line-height: 1.8;
 }
 
 /* ── Hide default streamlit chrome ── */
@@ -111,7 +128,7 @@ html, body, [class*="css"] {
 }
 
 /* ── Button ── */
-.stButton > button {
+.stButton button, .stButton > button, .stDownloadButton button, .stDownloadButton > button {
     background: linear-gradient(135deg, #ff8c32 0%, #ff5a1a 100%) !important;
     color: #0a0a0f !important;
     font-family: 'Syne', sans-serif !important;
@@ -126,12 +143,18 @@ html, body, [class*="css"] {
     box-shadow: 0 4px 20px rgba(255,140,50,0.3) !important;
     width: 100%;
 }
-.stButton > button:hover {
+.stButton button *, .stButton > button *, .stDownloadButton button *, .stDownloadButton > button * {
+    color: #0a0a0f !important;
+}
+.stButton button:hover, .stButton > button:hover, .stDownloadButton button:hover, .stDownloadButton > button:hover {
     transform: translateY(-2px) !important;
     box-shadow: 0 8px 28px rgba(255,140,50,0.4) !important;
     opacity: 0.95 !important;
 }
-.stButton > button:active {
+.stButton button:hover *, .stButton > button:hover *, .stDownloadButton button:hover *, .stDownloadButton > button:hover * {
+    color: #0a0a0f !important;
+}
+.stButton button:active, .stButton > button:active, .stDownloadButton button:active, .stDownloadButton > button:active {
     transform: translateY(0) !important;
 }
 
@@ -335,7 +358,66 @@ st.markdown("""
 col_input, col_spacer, col_pipeline = st.columns([5, 0.5, 4])
 
 with col_input:
+    has_openai, has_google = check_keys()
+    
+    # Custom CSS for status badges
+    st.markdown("""
+    <style>
+    .status-badge {
+        font-family: 'DM Mono', monospace;
+        font-size: 0.68rem;
+        padding: 0.15rem 0.4rem;
+        border-radius: 4px;
+        font-weight: 500;
+        display: inline-block;
+    }
+    .status-badge.active {
+        background: rgba(80,200,120,0.15);
+        color: #50c878;
+        border: 1px solid rgba(80,200,120,0.25);
+    }
+    .status-badge.missing {
+        background: rgba(255,80,30,0.15);
+        color: #ff501e;
+        border: 1px solid rgba(255,80,30,0.25);
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
     st.markdown('<div class="input-card">', unsafe_allow_html=True)
+    
+    # Model Selection Dropdown
+    st.markdown('<label style="font-family:\'DM Mono\', monospace; font-size:0.72rem; letter-spacing:0.15em; text-transform:uppercase; color:#ff8c32; font-weight:500;">AI Model Provider</label>', unsafe_allow_html=True)
+    
+    available_providers = []
+    if has_google:
+        available_providers.append("Google Gemini (Gemini 2.5 Flash)")
+    if has_openai:
+        available_providers.append("OpenAI (GPT-4o-mini)")
+        
+    if not available_providers:
+        available_providers = ["Google Gemini (Gemini 2.5 Flash)", "OpenAI (GPT-4o-mini)"]
+        
+    model_provider = st.selectbox(
+        "AI Model Provider",
+        options=available_providers,
+        key="model_provider_select",
+        label_visibility="collapsed"
+    )
+    
+    # Status Indicators for API Keys
+    badge_cols = st.columns(2)
+    with badge_cols[0]:
+        badge_cls = "active" if has_google else "missing"
+        badge_lbl = "Active" if has_google else "Placeholder"
+        st.markdown(f'<div style="text-align:center;"><span style="color:#aaa; font-size:0.75rem;">Gemini:</span> <span class="status-badge {badge_cls}">{badge_lbl}</span></div>', unsafe_allow_html=True)
+    with badge_cols[1]:
+        badge_cls = "active" if has_openai else "missing"
+        badge_lbl = "Active" if has_openai else "Placeholder"
+        st.markdown(f'<div style="text-align:center;"><span style="color:#aaa; font-size:0.75rem;">OpenAI:</span> <span class="status-badge {badge_cls}">{badge_lbl}</span></div>', unsafe_allow_html=True)
+        
+    st.markdown('<div style="margin-bottom: 1.2rem;"></div>', unsafe_allow_html=True)
+    
     topic = st.text_input(
         "Research Topic",
         placeholder="e.g. Quantum computing breakthroughs in 2025",
@@ -407,52 +489,88 @@ if run_btn:
 if st.session_state.running and not st.session_state.done:
     results = {}
     topic_val = st.session_state.topic_input
+    provider_val = st.session_state.model_provider_select
 
-    # ── Step 1: Search ──
-    with st.spinner("🔍  Search Agent is working…"):
-        search_agent = build_search_agent()
-        sr = search_agent.invoke({
-            "messages": [("user", f"Find recent, reliable and detailed information about: {topic_val}")]
-        })
-        results["search"] = sr["messages"][-1].content
-        st.session_state.results = dict(results)
-    st.rerun() if False else None   # keep inline for now
+    try:
+        # ── Step 1: Search ──
+        with st.spinner("🔍  Search Agent is working…"):
+            search_agent = build_search_agent(provider=provider_val)
+            sr = search_agent.invoke({
+                "messages": [("user", f"Find recent, reliable and detailed information about: {topic_val}")]
+            })
+            results["search"] = clean_content(sr["messages"][-1].content)
+            st.session_state.results = dict(results)
+        st.rerun() if False else None   # keep inline for now
 
-    # ── Step 2: Reader ──
-    with st.spinner("📄  Reader Agent is scraping top resources…"):
-        reader_agent = build_reader_agent()
-        rr = reader_agent.invoke({
-            "messages": [("user",
-                f"Based on the following search results about '{topic_val}', "
-                f"pick the most relevant URL and scrape it for deeper content.\n\n"
-                f"Search Results:\n{results['search'][:800]}"
-            )]
-        })
-        results["reader"] = rr["messages"][-1].content
-        st.session_state.results = dict(results)
+        time.sleep(3)  # Rate limit safety delay for free tier API keys
 
-    # ── Step 3: Writer ──
-    with st.spinner("✍️  Writer is drafting the report…"):
-        research_combined = (
-            f"SEARCH RESULTS:\n{results['search']}\n\n"
-            f"DETAILED SCRAPED CONTENT:\n{results['reader']}"
-        )
-        results["writer"] = writer_chain.invoke({
-            "topic": topic_val,
-            "research": research_combined
-        })
-        st.session_state.results = dict(results)
+        # ── Step 2: Reader ──
+        with st.spinner("📄  Reader Agent is scraping top resources…"):
+            reader_agent = build_reader_agent(provider=provider_val)
+            rr = reader_agent.invoke({
+                "messages": [("user",
+                    f"Based on the following search results about '{topic_val}', "
+                    f"pick the most relevant URL and scrape it for deeper content.\n\n"
+                    f"Search Results:\n{results['search'][:800]}"
+                )]
+            })
+            results["reader"] = clean_content(rr["messages"][-1].content)
+            st.session_state.results = dict(results)
 
-    # ── Step 4: Critic ──
-    with st.spinner("🧐  Critic is reviewing the report…"):
-        results["critic"] = critic_chain.invoke({
-            "report": results["writer"]
-        })
-        st.session_state.results = dict(results)
+        time.sleep(3)  # Rate limit safety delay for free tier API keys
 
-    st.session_state.running = False
-    st.session_state.done = True
-    st.rerun()
+        # ── Step 3: Writer ──
+        with st.spinner("✍️  Writer is drafting the report…"):
+            research_combined = (
+                f"SEARCH RESULTS:\n{results['search']}\n\n"
+                f"DETAILED SCRAPED CONTENT:\n{results['reader']}"
+            )
+            results["writer"] = get_writer_chain(provider=provider_val).invoke({
+                "topic": topic_val,
+                "research": research_combined
+            })
+            st.session_state.results = dict(results)
+
+        time.sleep(3)  # Rate limit safety delay for free tier API keys
+
+        # ── Step 4: Critic ──
+        with st.spinner("🧐  Critic is reviewing the report…"):
+            results["critic"] = get_critic_chain(provider=provider_val).invoke({
+                "report": results["writer"]
+            })
+            st.session_state.results = dict(results)
+
+        st.session_state.running = False
+        st.session_state.done = True
+        st.rerun()
+    except Exception as e:
+        st.session_state.running = False
+        st.session_state.done = False
+        # Extract clean error message if it's standard API error
+        error_msg = str(e)
+        if "RESOURCE_EXHAUSTED" in error_msg or "429" in error_msg:
+            st.error("⚠️ **API Rate Limit Exceeded (429 Resource Exhausted)**")
+            st.markdown("""
+            Your API key has run out of daily or per-minute quota.
+            
+            **How to resolve this:**
+            1. **Switch Model Provider:** Try switching to OpenAI or Google Gemini (whichever has active quota/billing).
+            2. **Update your API Keys:** Open the `.env` file in this directory and replace the placeholder keys with valid active keys.
+            3. **Check Billing/Plan:** Check your developer dashboard (e.g., [Google AI Studio](https://aistudio.google.com/) or [OpenAI Platform](https://platform.openai.com/)) to ensure your account has active credits.
+            """)
+        elif "invalid_api_key" in error_msg or "AuthenticationError" in error_msg or "401" in error_msg:
+            st.error("⚠️ **Invalid API Key (401 Unauthorized)**")
+            st.markdown("""
+            The selected model provider returned an authentication error.
+            
+            **How to resolve this:**
+            1. Open the `.env` file in the project directory.
+            2. Replace the placeholder (`your_openai_api_key_here` or generic placeholders) with your actual, active API key.
+            3. Save the `.env` file and try running again.
+            """)
+        else:
+            st.error(f"⚠️ **Error running the pipeline:** {error_msg}")
+            st.info("Tip: Double-check your API keys in the `.env` file and ensure your internet connection is active.")
 
 
 # ── Results display ───────────────────────────────────────────────────────────
@@ -482,14 +600,6 @@ if r:
         st.markdown(r["writer"])   # render markdown natively
         st.markdown("</div>", unsafe_allow_html=True)
 
-        # Download
-        st.download_button(
-            label="⬇  Download Report (.md)",
-            data=r["writer"],
-            file_name=f"research_report_{int(time.time())}.md",
-            mime="text/markdown",
-        )
-
     # Critic feedback
     if "critic" in r:
         st.markdown("""
@@ -498,6 +608,43 @@ if r:
         """, unsafe_allow_html=True)
         st.markdown(r["critic"])
         st.markdown("</div>", unsafe_allow_html=True)
+
+    # Export Section
+    if "writer" in r and "critic" in r:
+        st.markdown('<div class="section-heading">Export Portfolio</div>', unsafe_allow_html=True)
+        
+        topic_name = st.session_state.topic_input if "topic_input" in st.session_state else "Research"
+        
+        # Build PDF data using reportlab
+        report_pdf_data = generate_report_pdf(topic_name, r["writer"])
+        critic_pdf_data = generate_critic_pdf(topic_name, r["critic"])
+        combined_pdf_data = generate_combined_pdf(topic_name, r["writer"], r["critic"])
+        
+        dl_col1, dl_col2, dl_col3 = st.columns(3)
+        with dl_col1:
+            st.download_button(
+                label="⬇  Research Report (PDF)",
+                data=report_pdf_data,
+                file_name=f"research_report_{int(time.time())}.pdf",
+                mime="application/pdf",
+                use_container_width=True
+            )
+        with dl_col2:
+            st.download_button(
+                label="⬇  Critic Feedback (PDF)",
+                data=critic_pdf_data,
+                file_name=f"critic_feedback_{int(time.time())}.pdf",
+                mime="application/pdf",
+                use_container_width=True
+            )
+        with dl_col3:
+            st.download_button(
+                label="⬇  All-in-One Review (PDF)",
+                data=combined_pdf_data,
+                file_name=f"combined_review_{int(time.time())}.pdf",
+                mime="application/pdf",
+                use_container_width=True
+            )
 
 
 # ── Footer ────────────────────────────────────────────────────────────────────
